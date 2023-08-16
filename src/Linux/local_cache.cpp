@@ -10,12 +10,16 @@
 #include <fcntl.h>
 #include <ftw.h>
 #include <locale.h>
-#include <openssl/sha.h>
+#include <openssl/evp.h>
 #include <pwd.h>
 #include <unistd.h>
 #include <sys/file.h>
 #include <sys/stat.h>
 #include <sys/types.h>
+#include <stdexcept>
+#include <string>
+#include <sstream>
+#include <iomanip>
 
 constexpr uint16_t CACHE_V1 = 1;
 
@@ -239,36 +243,34 @@ static void init()
         init_callback();
     }
 }
+static std::string SHA3_256(size_t data_size, const void *data) {
+    EVP_MD_CTX *ctx = EVP_MD_CTX_new();
+    const EVP_MD *md = EVP_sha3_256();
+    EVP_DigestInit_ex(ctx, md, NULL);
+    EVP_DigestUpdate(ctx, data, data_size);
 
-static std::string sha256(size_t data_size, const void* data)
-{
-    unsigned char hash[SHA256_DIGEST_LENGTH];
-    SHA256_CTX sha256;
-    SHA256_Init(&sha256);
-    SHA256_Update(&sha256, data, data_size);
-    SHA256_Final(hash, &sha256);
+    unsigned char hash_value[EVP_MD_size(md)];
+    unsigned int hash_len;
+    EVP_DigestFinal_ex(ctx, hash_value, &hash_len);
 
-    std::string retval;
-    retval.reserve(2 * sizeof(hash) + 1);
-    for (size_t i = 0; i < sizeof(hash); i++)
-    {
-        char buf[3];
-        snprintf(buf, sizeof(buf), "%02x", hash[i]);
-        retval += buf;
+    EVP_MD_CTX_free(ctx);
+
+    std::stringstream retval;
+    retval << std::hex << std::setfill('0'); // Use std::hex and std::setfill
+    for (unsigned int i = 0; i < hash_len; i++) {
+        retval << std::setw(2) << static_cast<unsigned int>(hash_value[i]);
     }
 
-    return retval;
+    return retval.str();
 }
 
-static std::string sha256(const std::string& input)
-{
-    return sha256(input.length(), input.data());
+static std::string SHA3_256(const std::string &input) {
+    return SHA3_256(input.length(), input.data());
 }
 
-static std::string get_file_name(const std::string& id)
-{
+static std::string get_file_name(const std::string &id) {
     std::lock_guard<std::mutex> lock(cache_directory_lock);
-    return g_cache_dirname + "/" + sha256(id);
+    return g_cache_dirname + "/" + SHA3_256(id);
 }
 
 std::string get_cached_file_location(const std::string& id){
